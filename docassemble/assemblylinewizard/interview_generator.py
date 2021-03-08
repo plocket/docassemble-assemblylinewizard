@@ -221,12 +221,15 @@ class DAField(DAObject):
       self.field_type_guess = 'text'
       self.variable_name_guess = variable_name_guess
 
-  def fill_in_pdf_attributes(self, pdf_field_tuple):
+  def fill_in_pdf_attributes(self, pdf_field_tuple, doc_name='abc', seq_number: int=0):
     """Let's guess the type of each field from the name / info from PDF"""
     # The raw name of the field from the PDF: must go in attachment block
     self.raw_field_names : List[str] = [pdf_field_tuple[0]]
     # turns field_name into a valid python identifier: must be one per field
     self.variable : str = remove_multiple_appearance_indicator(varname(self.raw_field_names[0]))
+    if len(self.variable) == 0:
+      self.variable = '{}_seq_{}'.format(abc, seq_number)
+
     # the variable, in python: i.e., users[1].name.first
     self.final_display_var : str = map_raw_to_final_display(self.variable)
 

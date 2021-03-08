@@ -342,7 +342,7 @@ code: |
 
   if document_type == 'pdf':
     # Probably all of this should move into a class
-    for pdf_field_tuple in all_fields:
+    for idx, pdf_field_tuple in enumerate(all_fields):
       pdf_field_name = pdf_field_tuple[0]
       # Check to see if we think this field is built-in (handled in
       # basic-questions.yml), a signature, or an arbitrary field.
@@ -356,7 +356,7 @@ code: |
       
       # This function determines what type of variable
       # we're dealing with
-      new_field.fill_in_pdf_attributes(pdf_field_tuple)
+      new_field.fill_in_pdf_attributes(pdf_field_tuple, doc_name=short_filename, seq_number=idx)
 
   else:
     # if this is a docx, fields are a list of strings, not a list of tuples
