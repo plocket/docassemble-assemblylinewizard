@@ -62,8 +62,10 @@ code: |
   for field in fields:
     if ' ' in field[0]:
       warnings_temp.add('space')
+    if len(remove_multiple_indicator(varname(field[0]))) == 0:
+      warnings_temp.add('invalid_name')
     if field[4] not in ['/Sig','/Btn','/Tx']:
-      'not handled'
+      warnings_temp.add('not handled')
   warnings = warnings_temp
   del warnings_temp
 ---
@@ -74,7 +76,12 @@ subquestion: |
   Field name (bold if {reserved}) | Field type | {Internal docassemble name} (if different) | Max length
   -----------|------------|-------------------|-----------
   % for field in fields:
-  ${":exclamation-triangle: " if ' ' in field[0] else ''}${'**' + str(field[0]) + '**' if is_reserved_label(field[0]) else field[0]} | ${'Signature' if field[4] == '/Sig' else 'Checkbox' if field[4] == '/Btn' else "Text" if field[4] == '/Tx' else ':skull-crossbones:'} (${field[4]}) | ${map_raw_to_final_display(field[0]) if not (map_raw_to_final_display(field[0]) == field[0]) else ''} | ${ get_character_limit(field) if get_character_limit(field) else 'n/a' }
+  ${":exclamation-triangle: " if ' ' in field[0] else ''}
+  ${":exclamation-square: " if len(remove_multiple_indicator(varname(field[0]))) == 0 else ''}
+  ${'**' + str(field[0]) + '**' if is_reserved_label(field[0]) else field[0]} | 
+  ${'Signature' if field[4] == '/Sig' else 'Checkbox' if field[4] == '/Btn' else "Text" if field[4] == '/Tx' else ':skull-crossbones:'} (${field[4]}) | 
+  ${map_raw_to_final_display(field[0]) if not (map_raw_to_final_display(field[0]) == field[0]) else ''} | 
+  ${ get_character_limit(field) if get_character_limit(field) else 'n/a' }
   % endfor
 
   The following are signature fields: ${comma_and_list(signature_fields)} 
@@ -95,6 +102,11 @@ subquestion: |
   :exclamation-triangle: Indicates that the field name has a space in it. Please
   replace any spaces with underscores in the PDF field name before uploading to 
   Trello.
+  % endif
+
+  % if 'invalid_name' in warnings:
+  :exclamation_square: indicates that a field name is not a valid variable name.
+  Please at the least, start the field name with an alphabetical character (a-z).
   % endif
   
   % if 'not handled' in warnings:
