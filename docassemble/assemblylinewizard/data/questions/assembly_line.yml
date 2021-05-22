@@ -1,6 +1,6 @@
 metadata:
   title: |
-    Interview Weaver: Document Assembly Line 
+    Interview Weaver: Document Assembly Line
   short title: Weaver
 ---
 features:
@@ -16,12 +16,12 @@ modules:
 features:
   css: progressivedisclosure.css  
 ---
+include: 
+  - pdf_field_tester.yml
+---
 objects:
   - generator_data: DAStore.using(base='interview', encrypted=False) # store sequential use of this generator
   - interview: DAInterview.using(template_path='data/sources/output_patterns.yml')
-  - modules: DAQuestion
-  - attachments: DAAttachmentList
-  - preview_attachments: DAAttachmentList
   - built_in_fields_used: DAFieldList.using(gathered=True)
   - fields: DAFieldList.using(gathered=True)
   - signature_fields: DAFieldList.using(gathered=True)
@@ -43,6 +43,10 @@ mandatory: True
 id: Interview Order
 code: |
   template_upload
+  # Run pdf_field_tester.yml if form is a pdf.  
+  if template_upload[0].filename.endswith('pdf'):    
+    field_list_display
+    pdf_check_display
   interview.form_type
   interview.title
   interview_intro_prompt
@@ -89,6 +93,8 @@ subquestion: |
   This tool is part of the [Doc Assembly 
   Line](https://suffolklitlab.org/doc-assembly-line/)
   project.
+  
+  **If your file is PDF, we'll validate your PDF fields first.**
 fields:
   - Select a PDF or Word template: template_upload
     datatype: file
@@ -109,24 +115,41 @@ id: information about this interview
 question: |
   Information about this interview
 fields:
+  - Is your form court-related?: interview.court_related
+    datatype: yesnoradio
+    help: |
+      Answer yes if the form lists the name of a court, even if it is not
+      filed in a court. We will ask you
+      questions that help you list the correct set of courts as options.
   - Kind of form: interview.form_type
     datatype: radio
     choices:
       - Starts a new court case: starts_case
-      - Part of an existing court case: existing_case
-      - Appeal: appeal
+      - Filed in or responding to an existing court case: existing_case
+      - Part of an appeal of a court case: appeal
       - Form that is not filed in a court: other_form
+      - Other: other
+    show if: interview.court_related
+  - Kind of form: interview.form_type
+    datatype: radio
+    choices:
+      - Administrative form or other form that is not filed in a court: other_form
       - Letter: letter
       - Other: other
+    show if:
+      variable: interview.court_related
+      is: False
   - Allowed courts: interview.allowed_courts
     datatype: checkboxes
-    none of the above: True
+    none of the above: False
     code: |
       get_court_choices() + ['Other']
+    show if: interview.court_related
   - Alternate Allowed Courts (separate with a comma): interview.allowed_courts_text
     input type: area
     required: True
-    show if: interview.allowed_courts['Other']
+    js show if: |
+      val("interview.allowed_courts['Other']") && val("interview.court_related")
   - Categories: interview.categories
     datatype: checkboxes
     choices:
@@ -142,18 +165,20 @@ fields:
       - Education: ED-00-00-00-00
       - Prisoners' Rights: RI-10-00-00-00
       - Other: Other
+    none of the above: False
+    show if: interview.court_related
   - Other categories (separate with a comma): interview.other_categories
     datatype: area
     rows: 2
-    show if: interview.categories['Other']
-  - Unique label for this interview: interview.file_name
+    js show if: |
+      val("interview.categories['Other']") && val("interview.court_related")
+  - Unique label for this interview: interview_label_draft
     default: ${short_filename}
+    maxlength: 35
     help: |
-      This label should be unique across all interviews. It will be
-      used to name the file as well as an internal label for the Docassemble
-      coder.
-      
-      It won't be shown to the end user.
+      This label should be short but unique. It will be used to name your
+      package, the main YAML file, and give a unique label to variables inside
+      your document.
   - Link to original form: interview.original_form
     hint: http://masslegalhelp.org/my_form
     required: False
@@ -164,12 +189,30 @@ help:
     There are ${len(all_fields)} fields total.
 
     `${all_fields}`
-
-    * ${len(fields)} Fields we'll ask about
-    * ${len(built_in_fields_used)} built-in fields
-    * ${len(signature_fields)} signature fields
-
-    ${fields}
+---
+id: dependency question
+question: Which jurisdictions and organizations is this form a part of?
+subquestion: |
+  This will add those jurisdictions as dependencies. If you are unsure, leave the default options checked.
+help:
+  label: My jurisdiction is not here
+  content: |
+    New jurisdictions will be added soon. You should add those dependencies manually in the Playground until then.
+fields:
+  - no label: interview.dependency_choices
+    datatype: checkboxes
+    required: False
+    choices:
+      - Massachusetts State: docassemble.ALMassachusetts>=0.0.7
+      - MassAccess: docassemble.MassAccess
+    default:
+      - docassemble.ALMassachusetts>=0.0.7
+      - docassemble.MassAccess
+---
+code: |    
+  if not interview.court_related:   
+    interview.allowed_courts = DAEmpty()             
+    interview.categories = DAEmpty()
 ---
 code: |
   if interview.form_type == 'starts_case':
@@ -243,6 +286,9 @@ fields:
       - Plaintiff/Petitioner: plaintiff
       - Defendant/Respondent: defendant
       - Could be either: unknown
+      - None of the above: na
+    help: |
+      If form type is an appeal, this is asking about the role in the trial court, not appellate proceeding.
   #- Number of users whose information can be filled in on this form: user_count
   #  choices:
   #    - One user of this form at a time: one
@@ -270,8 +316,11 @@ code: |
   for person in person_candidates:
     temp_people_quantity_question.append({"How many **" + person + "** can appear on this form?": "people_quantities['" + person + "']",
       "datatype": "radio",
-      "choices": [{'Exactly 1': 'one'},{'At least one':'more'},{'Any number, including 0': 'any'}]
+      "choices": [{'Exactly 1': 'one'},{'At least one':'more'}]
       })
+    # Users can't have 0 elements, but other parties should have the option to be empty
+    if person != 'users':
+      temp_people_quantity_question[-1]['choices'].append({'Any number, including 0': 'any'})
   people_quantity_question = temp_people_quantity_question
   del temp_people_quantity_question
 ---
@@ -288,7 +337,7 @@ subquestion: |
   the form has in the case.
   % endif
 fields:
-  - code: people_quantity_question 
+  - code: people_quantity_question
 help:
   label: |
     What is this about?
@@ -301,15 +350,27 @@ help:
 continue button field: ask_people_quantity_question  
 ---
 comment: |
-  Get the list of fields
+  Get the list of fields, and check for any possible labeling errors
+  right away
 code: |
-  if template_upload[0].extension == 'pdf':
-    all_fields = get_pdf_fields(template_upload)
-  else:
-    all_fields = get_fields(template_upload) # template_upload.get_docx_variables()
+  try:
+    if template_upload[0].extension == 'pdf':
+      all_fields = get_pdf_fields(template_upload)
+    else:
+      all_fields = get_fields(template_upload)
+      
+    if all_fields is None:
+      force_ask('empty_pdf')
 
-  if all_fields is None:
-    force_ask('empty_pdf')
+    bad_fields = list(filter(
+        lambda elem: elem is not None, 
+        map(bad_name_reason, all_fields)))
+    if len(bad_fields) > 0:
+      force_ask('non_descriptive_field_name')
+      
+  except ParsingException as ex:
+    parsing_ex = ex
+    force_ask('parsing_exception')
 ---
 event: empty_pdf
 question: You uploaded an empty PDF
@@ -320,6 +381,32 @@ subquestion: |
   If you saved a DOCX file as a PDF, you will need to add fillable fields in a tool like [Adobe Acrobat](https://acrobat.adobe.com). 
   For more info, see the [documentation](https://suffolklitlab.org/docassemble-AssemblyLine-documentation/docs/pdfs).
 
+buttons:
+  - Restart: restart
+---
+event: non_descriptive_field_name
+question: Some of the fields in your PDF are not descriptive
+subquestion: |
+  There are fields that can't be turned into descriptive variable names in the given PDF. You should make sure all field names abide by the rules in the [documentation](https://suffolklitlab.org/docassemble-AssemblyLine-documentation/docs/pdfs).
+  
+  The fields that have issues are:
+
+  % for bad_field in bad_fields:
+    * ${ bad_field }
+  % endfor
+
+buttons:
+  - Restart: restart
+---
+event: parsing_exception
+question: ${ parsing_ex.main_issue }
+subquestion: |
+  ${ parsing_ex.description }
+
+  % if parsing_ex.url is not None:
+  Check out the [documentation](${ parsing_ex.url }) to learn more.
+  % endif
+  
 buttons:
   - Restart: restart
 ---
@@ -461,6 +548,7 @@ code: |
     "short_title": interview.short_title,
     "description": interview.description,
     "original_form": interview.original_form,
+    "court_related": interview.court_related,
     "allowed_courts": interview.allowed_courts,
     "categories": interview.categories,
     "other_categories": interview.other_categories if defined('interview.other_categories') else '',
@@ -866,7 +954,8 @@ code: |
   # generated interview to let us store interview-specific
   # metadata
   # We removed random ID, so make sure the file names are unique
-  interview_label = (varname(interview.file_name) if varname(interview.file_name) else varname('ending_variable_' + interview.file_name))
+  # varname will strip leading numbers--but they may be valid at the end of the label
+  interview_label = (varname(interview_label_draft) if varname(interview_label_draft) else varname('ending_variable_' + interview_label_draft))
 ---
 code: |
   attachment_variable_name = interview_label + '_attachment'
@@ -875,29 +964,33 @@ id: download your interview
 comment: | 
 event: show_interview
 question: |
-  All done: Download your interview
+  Congratulations, you have completed your draft interview!
 subquestion: |
+  
+  #### Download the generated interview 
+  **If you just started a new interview project**, you need to download the generated interview as a Docassemble package:
+    
+  ${ action_button_html(interview_package_download.url_for(attachment=True), color='info', label='Download Your Package') }
 
-  ### Please download the generated interview below
+  After download,<br> 
+  1. Go to your _Playground_ to add a new project.<br>
+  2. Open the new project's _Packages_ folder.<br>
+  3. Use the third icon _Upload_ to install this package.<br>
+  4. Go back to Playground, delete test.yml file, now you can see your interview file.
   
-  Download the YAML file only:  
-  [:download: Download YAML](${interview_download.url_for(attachment=True)})
+  **If you rerun the Weaver and only want the yml file**, you can just download it below:  
+     
+  ${ action_button_html(interview_download.url_for(attachment=True), color='info', label='Download Your Yaml File') }
   
-  Download the interview as a Docassemble package:  
-  [:download: Download Package](${interview_package_download.url_for(attachment=True)})
+  #### Advanced  
   
-  ### Preview of Docassemble interview file
-  
-  <a class="collapsed" data-toggle="collapse" href="#yaml_source" role="button" aria-expanded="false" aria-controls="collapseExample"><span class="pdcaretopen"><i class="fas fa-caret-down"></i></span><span class="pdcaretclosed"><i class="fas fa-caret-right"></i></span> View contents</a>
+  <a class="collapsed" data-toggle="collapse" href="#yaml_source" role="button" aria-expanded="false" aria-controls="collapseExample"><span class="pdcaretopen"><i class="fas fa-caret-down"></i></span><span class="pdcaretclosed"><i class="fas fa-caret-right"></i></span> Review your interview yml code</a>
   
   <div class="collapse" id="yaml_source">
   <pre>
   ${indent_by(interview.source(),4)}
   </pre>
   </div>
-  
-  ### Advanced
-  
   If you want to test your interview before you leave this screen, click
   the "Install your interview" button. You will have a chance to uninstall
   it once you are done. This can be a quick way to test it interactively 
@@ -918,43 +1011,58 @@ subquestion: |
   % endif
   
 ---
+objects: 
+  - labels_lists: DAList.using(auto_gather=False, gathered=True)
+  - instruction_starts_case: DAStaticFile.using(filename='next_steps_starts_case.docx')    
+  # Here we add the "next_steps" docx files
+  # To add additional attachment files, follow this example
+  - instruction_existing_case: DAStaticFile.using(filename='next_steps_existing_case.docx')
+  - instruction_appeal: DAStaticFile.using(filename='next_steps_appeal.docx') 
+  - instruction_letter: DAStaticFile.using(filename='next_steps_letter.docx')
+  - instruction_other: DAStaticFile.using(filename='next_steps_other_form.docx')
+---
 code: |
-  interview_download.initialize(filename = interview.file_name + '.yml')
+  # Package title is PascalCase, per our AssemblyLine convention
+  package_title = re.sub("\W|_","", interview_label.title())
+---
+# Prepare content for the Weaver's download screen.
+code: |
+  # 1. Commit the generated interview YAML file
+  interview_download.initialize(filename = interview_label + '.yml')
   interview_download.write(interview.source())
-  interview_download.commit()
+  interview_download.commit()    
+  
+  # 2. Add all the template files to a list
+  # Each list item is a file object, not a string.
+  template_files = [template_upload[0]] 
+  # Here we add the "next_steps" docx file. 
+  # To add additional attachment files, follow this example
+  if interview.form_type == 'starts_case':
+    template_files.append(instruction_starts_case)
+  elif interview.form_type == 'existing_case':
+    template_files.append(instruction_existing_case)
+  elif interview.form_type == 'appeal':
+    template_files.append(instruction_appeal)
+  elif interview.form_type == 'letter':
+    template_files.append(instruction_letter)
+  elif interview.form_type == 'other_form':
+    template_files.append(instruction_other)
 
   folders_and_files = {
-    "templates": template_upload,
+    "templates": template_files,
     "questions": [interview_download],
     "modules":[],
     "static": [],
     "sources": []
   }
   
-  create_package_zip(re.sub("\W","",interview.title), interview.package_info(), {"author name and email":"author@example.com"}, folders_and_files, interview_package_download)
-  
+  create_package_zip(package_title,
+        interview.package_info(interview.dependency_choices.true_values()),
+        {"author name and email":"author@example.com"},
+        folders_and_files, 
+        interview_package_download)
+
   wrote_interview = True
----
-need:
-  - template_upload[0].filename
-  - built_in_fields_used
-  - fields
-  - signature_fields
-  - interview.short_title
-code: |
-  # TODO: is there a good reason to have separate variable for PDF/DOCX filename?
-  # I think this is an artifact from when wizard only handled PDFs
-  attachment = attachments.appendObject()
-  attachment.filename = template_upload[0].filename
-  if template_upload[0].extension == 'pdf':
-    attachment.pdf_filename = template_upload[0].filename    
-    attachment.type = 'pdf'
-  else:
-    attachment.type = 'docx'
-    attachment.docx_filename = template_upload[0].filename
-  attachment.fields = built_in_fields_used + fields + signature_fields
-  attachment.name = interview.short_title
-  attachments.gathered = True
 ---
 need:
   - interview_label
@@ -968,50 +1076,68 @@ code: |
   add_preview_question = True
 ---
 need:
-  - attachments
-  - attachment_variable_name
   - interview_label
-  - attachment.name
-  - attachment.type
 code: |
-  # This is the question that goes with the regular attachment
   end_question = interview.blocks.appendObject()
   end_question.template_key = 'download screen'
-  end_question.data = {"interview_label": interview_label}
+  end_question.data = {
+      "interview_label": interview_label, 
+      "document_type": 'pdf' if any(map(lambda templ: templ.extension == 'pdf', template_upload)) else 'docx'
+  }
   add_end_question = True
----
-need:
-  - attachments
-  - attachment_variable_name
-  - interview_label
-  - attachment.name
-  - attachment.type
+---  
 code: |
-  # TODO(#113): allow multiple attachments here eventually
-  attachment_objects  = interview.blocks.appendObject()
-  attachment_objects.template_key = "attachment objects"
-  attachment_objects.data = {
-    "attachment_variable_name": attachment_variable_name,
-    "filename": attachment.filename,
-    "description": interview.description
-  }
-  
-  attachment_bundles = interview.blocks.appendObject()
-  attachment_bundles.template_key = "bundle objects"
-  attachment_bundles.data = {
-    "attachment_variable_name": attachment_variable_name,
-    "bundle_filename": interview.file_name,        
-  }
+  #-----------------------------------------------------------------
+  # Prepare data for output_patterns.yml, each attachment file must provide those 6 attributes.
+  #-----------------------------------------------------------------
+      
+  # Set attributes for the "next_steps" docx. 
+  # To add any additional attachment files, follow this example.
+  if interview.form_type != 'other':     
+    file2 = labels_lists.appendObject()
+    file2.input_filename = 'next_steps_' + interview.form_type + '.docx'
+    file2.output_filename = 'Post-interview-instructions'
+    file2.attachment_varname = file2.output_filename.replace('-', '_')
+    file2.type = 'docx'
+    file2.description = 'Instructions'
+    file2.fields = 'na'
 
-  # This is the place to handle multiple files--i.e., next_steps document
+  # Set attributes for the upladed template file     
+  file1 = labels_lists.appendObject()    
+  file1.input_filename = template_upload[0].filename
+  file1.output_filename = interview_label
+  file1.attachment_varname = attachment_variable_name    
+  file1.type = template_upload[0].extension  
+  file1.description = interview.description
+  file1.fields = built_in_fields_used + fields + signature_fields
+
+  # Bundl-name is a single value
+  if len(labels_lists) > 1:
+    bundle_name = file1.output_filename + '_package.pdf'
+  else:
+    bundle_name = file1.output_filename + '.pdf'
+    
+  #-----------------------------------------------------------------
+  # Use the above data to generate blocks related to attachment files.
+  #-----------------------------------------------------------------
+  # ALDocument objects. 
+  attachment_objects  = interview.blocks.appendObject()
+  attachment_objects.template_key = "al-document objects"
+  attachment_objects.data = {
+    "attachment_attributes": labels_lists,    
+  }
+  # ALDocumentBundle objects.  
+  attachment_bundles = interview.blocks.appendObject()
+  attachment_bundles.template_key = "al-document-bundle objects"
+  attachment_bundles.data = {
+    "bundle_elements": labels_lists,
+    "bundle_filename": bundle_name,        
+  }
+  # Regular DA attachments block.   
   attachment_block = interview.blocks.appendObject()
-  attachment_block.template_key = 'attachment'
+  attachment_block.template_key = 'da attachments block'
   attachment_block.data = {
-    "attachment_variable_name": attachment_variable_name,
-    "attachment_filename": interview.file_name,
-    "type": attachment.type,
-    "template_filename": attachment.filename,
-    "fields": attachment.fields
+    "attachment_attributes": labels_lists,    
   }
   
   add_attachment = True
@@ -1070,17 +1196,26 @@ subquestion: |
   
   <i class="fas fa-spinner fa-pulse"></i> 
   % else:  
-  ${ action_button_html(interview_url(i="docassemble." + space_to_underscore(re.sub("\W","",interview.title)) + ":data/questions/" + interview.file_name + '.yml'), label = "Run interview", new_window=True ) }  
+  ${ action_button_html(interview_url(reset=1, i="docassemble." + package_title + ":data/questions/" + interview_label + '.yml'), label = "Run interview", new_window=True ) }
   % endif
 
   ${ action_button_html(url_action('button_uninstall_package'),label="Uninstall interview", color="danger") }
+  
+  <a class="collapsed" data-toggle="collapse" href="#yaml_source" role="button" aria-expanded="false" aria-controls="collapseExample"><span class="pdcaretopen"><i class="fas fa-caret-down"></i></span><span class="pdcaretclosed"><i class="fas fa-caret-right"></i></span> Review your interview yml code</a>
+  
+  <div class="collapse" id="yaml_source">
+  <pre>
+  ${indent_by(interview.source(),4)}
+  </pre>
+  </div>
+
 
   Download the YAML file only:  
   [:download: Download YAML](${interview_download.url_for(attachment=True)})
   
   Download the interview as a Docassemble package:  
   [:download: Download Package](${interview_package_download.url_for(attachment=True)})
-check in: set_final_package_install_status  
+check in: set_final_package_install_status
 ---
 code: |
   install_packages_api_key = get_config('install packages api key')
@@ -1094,18 +1229,19 @@ code: |
 event: uninstall_package_event
 code: |
   data = {"key": install_packages_api_key,
-          "package": "docassemble." + space_to_underscore(re.sub("\W","",interview.title))
+          "package": "docassemble." + package_title
           }
   status = installer.delete("package", data=data)
   background_response()            
 ---
 event: install_package_event
 code: |
-  data = {"key": install_packages_api_key,
-          "restart": 0
+  data = {"key": install_packages_api_key
           }
   files = {'zip': interview_package_download }
   status = installer.post("package",data=data, files=files, task='install package')  
+  # clear the interview cache
+  installer.post("clear_cache", data = {"key": install_packages_api_key } )
   background_response_action('save_status_to_answers', status=status)
 ---
 event: save_status_to_answers
@@ -1144,4 +1280,4 @@ reload: True
 event: waiting_screen_uninstall
 question: |
   Package is being uninstalled, please wait here
-reload: True    
+reload: True

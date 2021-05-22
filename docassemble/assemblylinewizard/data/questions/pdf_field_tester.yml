@@ -1,31 +1,24 @@
-metadata:
-  title: |
-    Assembly Line PDF Pre-flight Checker
-  short title: Pre-flight Checker
----
-modules:
-  - .interview_generator
----
-question: |
-  PDF Pre-flight checker
-subquestion: |
-  Use this tool to validate your PDF once you have labeled all fields.
-fields:
-  - Please upload a PDF template: template_upload
-    datatype: file
-    accept: |
-      ".pdf, application/pdf"
+comment: |
+  Changes made in this file to merge this file into assembly_line.yml (5/2021):
+  1. Removed upload_template and metadata.
+  2. Changed fields to fields_raw and signature_fields to signature_fields_test to avoid name conflicts with the Weaver's main code.  
+  3. Removed two "mandatory:true".
+  4. Added "continue button field: interview.title" and "field: pdf_check_display" on the final screen to follow the Weaver's main order. 
 ---
 objects:
   - placeholder_signature: DAStaticFile.using(filename='placeholder_signature.png')
 ---
+images:
+  stop_sign: stop_sign.png  
+  green_light: green_light.png
+---
 code: |
-  fields = get_pdf_fields(template_upload)
-  if fields is None:
+  fields_raw = get_pdf_fields(template_upload)
+  if fields_raw is None:
     force_ask('empty_pdf')
 
-  signature_fields = [field[0] for field in fields if len(field) >4 and field[4] == '/Sig']
-  checkbox_fields = [field[0] for field in fields if len(field) > 4 and field[4] == '/Btn']
+  signature_fields_test = [field[0] for field in fields_raw if len(field) >4 and field[4] == '/Sig']
+  checkbox_fields = [field[0] for field in fields_raw if len(field) > 4 and field[4] == '/Btn']
 ---
 event: empty_pdf
 question: You uploaded an empty PDF
@@ -39,31 +32,15 @@ subquestion: |
 buttons:
   - Restart: restart
 ---
-comment: |
-  This block was copied from assembly_line.yml
-  
-  Please update it if the assembly_line.yml is updated.
-variable name: variables_to_skip
-data:
-  - signature_date
-  - plaintiff
-  - plaintiffs
-  - defendant
-  - defendants
-  - petitioner
-  - petitioners
-  - witnesses
-  - users
-  - other_parties
-  - children
----
 code: |
   warnings_temp = set()
-  for field in fields:
+  for field in fields_raw:
     if ' ' in field[0]:
       warnings_temp.add('space')
+    if len(remove_multiple_appearance_indicator(varname(field[0]))) == 0:
+      warnings_temp.add('invalid_name')
     if field[4] not in ['/Sig','/Btn','/Tx']:
-      'not handled'
+      warnings_temp.add('not handled')
   warnings = warnings_temp
   del warnings_temp
 ---
@@ -71,13 +48,13 @@ question: |
   Field list
 subquestion: |
 
-  Field name (bold if {reserved}) | Field type | {Internal docassemble name} | Max length
+  Field name (bold if {reserved}) | Field type | {Internal DA name} | Max length
   -----------|------------|-------------------|-----------
-  % for field in fields:
-  ${ ":exclamation-triangle: " if ' ' in field[0] else ''}${'**' + str(field[0]) + '**' if is_reserved_label(field[0]) else field[0]} | ${'Signature' if field[4] == '/Sig' else 'Checkbox' if field[4] == '/Btn' else "Text" if field[4] == '/Tx' else ':skull-crossbones:'} (${field[4]}) | ${map_raw_to_final_display(field[0]) if is_reserved_label(field[0]) else ''} | ${ get_character_limit(field) if get_character_limit(field) else 'n/a' }
+  % for field in fields_raw:
+  ${":exclamation-triangle: " if ' ' in field[0] else ''} ${":exclamation-circle: " if len(remove_multiple_appearance_indicator(varname(field[0]))) == 0 else ''} ${'**' + str(field[0]) + '**' if is_reserved_label(field[0]) else field[0]} | ${ pdf_field_type_str(field) } (${field[4]}) | ${map_raw_to_final_display(field[0]) if not (map_raw_to_final_display(field[0]) == field[0]) else ''} | ${ get_character_limit(field) if get_character_limit(field) else 'n/a' }
   % endfor
 
-  The following are signature fields: ${comma_and_list(signature_fields)} 
+  The following are signature fields: ${comma_and_list(signature_fields_test)} 
   
   The following are checkbox fields: ${comma_and_list(checkbox_fields)}
   
@@ -86,21 +63,26 @@ subquestion: |
   to be bold, check spelling.
   
   Names for groups of **people** should be bold if you followed our naming guidelines.
-  Please make sure that you used the right name. E.g., use "plaintiff" not
+  Make sure that you used the right name. E.g., use "plaintiff" not
   "plaintiff_tenant". Check for misspellings if a name is not bold.
   
   Let us know if we should add a new type of person.
   
   % if 'space' in warnings:
-  :exclamation-triangle: Indicates that the field name has a space in it. Please
-  replace any spaces with underscores in the PDF field name before uploading to 
+  :exclamation-triangle: Indicates that the field name has a space in it.
+  Replace any spaces with underscores in the PDF field name before uploading to
   Trello.
+  % endif
+
+  % if 'invalid_name' in warnings:
+  :exclamation-circle: indicates that a field name is not a valid variable name.
+  At the least, start the field name with an alphabetical character (a-z).
   % endif
   
   % if 'not handled' in warnings:
   :skull-crossbones: Indicates it's a field type that our interview generator
   does not currently handle. OR that the field has a duplicate name. 
-  Please make sure the field is a checkbox, text 
+  Make sure the field is a checkbox, text
   input, or digital signature field and that it is not a duplicate.
   % endif
   
@@ -109,44 +91,52 @@ subquestion: |
   authors, not quality control.
 
 continue button field: field_list_display
-mandatory: True
 help: |
-  % for field in fields:
+  % for field in fields_raw:
   * ${field}
   % endfor
 terms: 
   - reserved: |
       Means there is a built-in question for this field.
-  - Internal docassemble name: |
+  - Internal DA name: |
       Means that the variable name will be changed for Docassemble. 
       We change names that have built-in questions, as well as those starting
       with the name of a person/group of people, which we turn into "attributes" of that person.
 ---
 code: |
-  signatures = [{field: placeholder_signature} for field in signature_fields]
+  signatures = [{field: placeholder_signature} for field in signature_fields_test]
   checkboxes = [{field: 'Yes'} for field in checkbox_fields]
-  other_fields = [{field[0]: map_raw_to_final_display(field[0])} for field in fields if not field[0] in signatures and not field[0] in checkbox_fields]
+  other_fields = [{field[0]: map_raw_to_final_display(field[0])} for field in fields_raw if not field[0] in signatures and not field[0] in checkbox_fields]
   pdf_fields = other_fields + checkboxes + signatures
 ---
-mandatory: True
+attachment:
+  variable name: quality_check_overlay
+  docx template file: quality_check_overlay.docx
+---
+field: pdf_check_display
 question: |
   Here is the filled-in PDF
 subquestion: |
   The fields are filled in with the name that we'll use in the YAML file.
   
-  All checkboxes should be checked. If not, please check the field's
+  All checkboxes should be checked. If not, check the field's
   "export" value. It should be set to "Yes".
   
-  If the text is unusually sized, then please check the font size and 
+  If the text is unusually sized, then check the font size and
   whether the field is set to allow multiple lines.
   
   All signature fields should be filled in with this image: ${placeholder_signature}
   
-  ${my_pdf}
+  ${ pdf_concatenate( overlay_pdf( quality_check_overlay, my_pdf ), filename="do_not_use.pdf") }
   
-  **Note: you do not need to download this form.** This is just a preview
-  to help you catch any errors. Use the original PDF that you uploaded
-  for the next step.
+  [FILE stop_sign, 5%] **Do not download this form.** It is just a preview
+  to help you catch any errors. 
+  
+  [FILE stop_sign, 5%] **If your job is only to label the form, stop here**. Your form has passed the test, you can now pass the PDF file that you uploaded to the next person for interview building.
+  
+  [FILE green_light, 5%] **If your job is to build the interview**, press the "continue" button below to build your draft interview.
+continue button label: Continue to build interview
+continue button field: interview.title
 ---
 attachment:
   variable name: my_pdf
